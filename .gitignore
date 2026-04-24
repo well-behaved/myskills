@@ -1,0 +1,17 @@
+# macOS
+.DS_Store
+.AppleDouble
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OpenCode / agent runtime cache
+.opencode/
+.sisyphus/
