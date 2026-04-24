@@ -145,7 +145,7 @@ git -C <worktree_path> diff --cached --name-only
 
 ### Step 3：分批派发给审查执行器
 
-**分批规则**：每批最多 5 个文件（Mapper.java + Mapper.xml 算 1 个），并行执行。
+**分批规则**：每批最多 3 个文件（Mapper.java + Mapper.xml 算 1 个），并行执行。批次越小，执行器的上下文越短，规则覆盖越完整，不得为减少批次数而增大每批文件数。
 
 对每批文件，使用 `task` 工具派发：
 
@@ -268,36 +268,65 @@ task(
     "file": "path/to/File.java",
     "fixes": [
       {
-        "id": "F01",
         "line": 12,
         "target": "字段 xxxService",
-        "desc": "@Autowired 替换为 @Resource"
+        "desc": "@Autowired 替换为 @Resource",
+        "action": "replace",
+        "before": "@Autowired",
+        "after": "@Resource"
       },
       {
-        "id": "F02",
         "line": 67,
         "target": "catch 块 log.error(\"加载失败\")",
-        "desc": "补充异常参数 e"
+        "desc": "补充异常参数 e",
+        "action": "replace",
+        "before": "log.error(\"加载失败\")",
+        "after": "log.error(\"加载失败\", e)"
       }
     ]
   }
 ]
 ```
 
-**AUTO-FIXABLE 问题编号对照表（只有这些编号才能出现在此列表）：**
+**fix 字段说明：**
 
-| ID | 问题类型 | 级别 |
-|----|---------|------|
-| F01 | `@Autowired` → `@Resource` | P1 |
-| F02 | `log.error` 漏传异常对象 `e` | P2 |
-| F03 | Entity/DTO 缺 `serialVersionUID` | P2 |
-| F04 | `LocalDateTime` 字段缺 `@TableField(typeHandler=TimestampTypeHandler.class)` | P1 |
-| F05 | 类缺 `@author` + `@since` 注释 | P2 |
-| F06 | public 方法缺 Javadoc | P2 |
-| F07 | SaveParam 必填字段缺 `@NotBlank`/`@NotNull` 模板 | P2 |
-| F08 | public 方法体超过 50 行，需机械拆分（提取数据准备/映射/组装逻辑为私有方法） | P2 |
+| 字段 | 必填 | 说明 |
+|------|------|------|
+| `line` | 是 | 问题所在行号（用于定位） |
+| `target` | 是 | 目标位置的人类可读描述 |
+| `desc` | 是 | 修复意图描述（apm-auto-fix 执行时的主要依据） |
+| `action` | 是 | 修复动作：`replace`（替换）/ `insert_before`（前插入）/ `insert_after`（后插入）/ `append_annotation`（追加注解） |
+| `before` | **必填** | 修复前的代码片段（供精确定位，可含省略号 `...`，不得为空） |
+| `after` | **必填** | 修复后的代码片段（不得为空，apm-auto-fix 依赖此字段执行修复） |
 
-**不得出现在此列表的问题（有业务歧义）：** P0 全部、事务方法名、权限注解、循环内查询、方法签名、基类继承、Controller 业务逻辑、FindParam `@Query` 注解、Feign Fallback。
+**AUTO-FIXABLE 判断标准（执行器自行判断，无固定编号白名单）：**
+
+满足以下**全部条件**的问题才可进入此列表：
+
+1. **规则明确**：修复动作是确定的文本替换/插入/追加，无需理解业务逻辑
+2. **无业务歧义**：不涉及方法签名变更、业务流程调整、跨文件改动
+3. **可安全回滚**：修复失败时可通过 lsp_diagnostics 检测并原样还原
+
+**典型可自动修复问题（示例，不限于此）：**
+
+| 问题类型 | 级别 | 修复动作 |
+|---------|------|---------|
+| `@Autowired` → `@Resource` | P1 | 替换注解 |
+| `log.error` 漏传异常对象 `e` | P2 | 追加参数 |
+| Entity/DTO 缺 `serialVersionUID` | P2 | 插入字段 |
+| `LocalDateTime` 字段缺 `@TableField(typeHandler=TimestampTypeHandler.class)` | P1 | 追加/修改注解 |
+| 类缺 `@author` + `@since` 注释 | P2 | 插入 Javadoc |
+| public 方法缺 Javadoc | P2 | 插入 Javadoc 模板 |
+| SaveParam 必填字段缺 `@NotBlank`/`@NotNull` | P2 | 追加注解 |
+| public 方法体超过 50 行，可机械拆分 | P2 | 提取 private 方法 |
+| `if/for` 单行语句缺大括号 | P2 | 补大括号 |
+| 覆写方法缺 `@Override` | P2 | 追加注解 |
+| `log.error` 使用字符串 `+` 拼接而非占位符 | P3 | 替换为 `{}` 占位符 |
+| `switch` 缺 `default` 分支 | P2 | 追加 default |
+| POJO 使用基本类型而非包装类型 | P1 | 替换类型声明 |
+| `e.printStackTrace()` → `log.error` | P2 | 替换调用 |
+
+**不得出现在此列表的问题（有业务歧义，禁止自动修复）：** P0 全部（SQL注入/事务/NPE/数据完整性）、事务方法名、权限注解、循环内查询（N+1）、方法签名变更（返回类型/入参类型）、基类继承、Controller 业务逻辑、FindParam `@Query` 注解、Feign Fallback、类拆分（>800行）、跨文件改动。
 
 如本次审查无可自动修复问题，输出空数组：`[]`
 ```

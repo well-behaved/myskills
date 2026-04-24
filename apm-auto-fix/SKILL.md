@@ -1,7 +1,7 @@
 ---
 name: apm-auto-fix
 description: |-
-  APM 后端项目自动修复编排器。调用 apm-code-review 扫描代码，自动修复可安全处理的 P1/P2 规范问题（F01-F08），
+  APM 后端项目自动修复编排器。调用 apm-code-review 扫描代码，自动修复报告 AUTO-FIX LIST 中所有可安全处理的问题，
   修复后再次调用 apm-code-review 验证，循环直到干净或达到上限。
   P0 及有业务歧义的复杂问题保留在报告供人工决策，不自动修改。
   支持与 apm-code-review 相同的所有范围模式。
@@ -33,7 +33,7 @@ apm-backend 是 **Spring Cloud 微服务架构**的工厂 APM 系统后端。
 
 1. **扫描能力完全来自 apm-code-review**，不自己实现任何审查逻辑
 2. **只修改本次范围内的文件**，范围由第一轮 apm-code-review 确定，后续轮次相同
-3. **只修复 AUTO-FIX LIST 中明确列出的问题（F01-F08，覆盖 P1 和 P2 级别）**，不做额外重构或风格调整
+3. **只修复 AUTO-FIX LIST 中明确列出的问题**，不做额外重构或风格调整
 4. **最多执行 2 轮修复循环**，超出后将残留问题写入报告，停止
 5. **修复后必须跑 lsp_diagnostics**，有 error 立即回滚该文件并记录
 6. **P0 问题和有业务歧义的问题**一律不自动修复，保留在报告供人工决策
@@ -164,8 +164,8 @@ task(
 ```
 第 N 轮修复：
   共 M 个文件，X 个问题需修复
-  - path/to/File.java：F01×1, F03×1
-  - path/to/Entity.java：F04×2
+  - path/to/File.java：3 个问题（@Autowired→@Resource, serialVersionUID, log.error补参数）
+  - path/to/Entity.java：2 个问题（LocalDateTime TypeHandler ×2）
 ```
 
 #### Step 2b：读取待修复文件的当前内容
@@ -309,142 +309,36 @@ Worktree 已清理：{WORK_DIR}
 
 ## 问题清单
 
-{从 AUTO-FIX LIST 提取的该文件 fixes 数组}
+{从 AUTO-FIX LIST 提取的该文件 fixes 数组，JSON 原文}
 
-示例：
-- [F01] 第 12 行，字段 xxxService：@Autowired 替换为 @Resource
-- [F02] 第 67 行，catch 块 log.error("加载失败")：补充异常参数 e
-- [F03] 类级别：在类体第一个字段前插入 serialVersionUID
-- [F04] 第 23 行，字段 createTime：@TableField 追加 typeHandler = TimestampTypeHandler.class
-- [F05] 类级别：在类声明前插入 @author + @since 注释模板
-- [F06] 第 34 行，方法 findByCode：在方法声明前插入 Javadoc 模板
-- [F07] 第 15 行，字段 name：追加 @NotBlank 注解模板
-- [F08] 第 42 行，方法 findChangeLogByIds（约 75 行）：拆分为主方法 + 私有辅助方法
+每条 fix 包含：
+- `line`：问题行号，用于定位
+- `target`：目标位置描述
+- `desc`：修复意图（核心依据）
+- `action`：修复动作（`replace` / `insert_before` / `insert_after` / `append_annotation`）
+- `before`：修复前代码片段（精确定位用）
+- `after`：修复后代码片段
 
-## 各问题修复规范
+## 执行原则
 
-### F01：@Autowired → @Resource
-```java
-// 修复前
-@Autowired
-private XxxService xxxService;
-// 修复后
-@Resource
-private XxxService xxxService;
-```
+1. **以 `desc` + `action` 为主要依据**：`desc` 描述了修复意图，`action` 说明了操作类型
+2. **以 `before`/`after` 为精确定位**：若提供了 before/after，优先用其精确匹配，不要自行猜测修改范围
+3. **`line` 仅作参考**：代码可能因之前的修复而行号偏移，先用 before 匹配，找不到再用行号定位
+4. **每条 fix 独立执行**：逐条处理，中间遇到编译错误立即停止并上报
 
-### F02：log.error 补充异常参数
-```java
-// 修复前
-} catch (Exception e) {
-    log.error("操作失败");
-}
-// 修复后
-} catch (Exception e) {
-    log.error("操作失败", e);
-}
-```
-注意：catch 变量名以实际代码为准，不一定是 `e`。
+## 通用修复规范
 
-### F03：补充 serialVersionUID
-在类体的**第一个字段声明前**插入：
-```java
-private static final long serialVersionUID = 1L;
-```
+### replace（替换）
+用 Edit 工具将 `before` 内容替换为 `after` 内容，保持缩进和上下文不变。
 
-### F04：LocalDateTime 字段补充 TypeHandler
-```java
-// 原有只有 value 属性
-@TableField("create_time")
-private LocalDateTime createTime;
-// 修复后
-@TableField(value = "create_time", typeHandler = TimestampTypeHandler.class)
-private LocalDateTime createTime;
+### insert_before（前插入）
+用 Edit 工具将 `after` 内容插入到 `before` 所在行的上方，对齐缩进。
 
-// 原无注解
-private LocalDateTime createTime;
-// 修复后
-@TableField(typeHandler = TimestampTypeHandler.class)
-private LocalDateTime createTime;
-```
+### insert_after（后插入）
+用 Edit 工具将 `after` 内容插入到 `before` 所在行的下方，对齐缩进。
 
-### F05：类注释模板
-在类声明的最前面插入：
-```java
-/**
- * TODO: 类描述
- *
- * @author TODO
- * @since {今天日期，格式 yyyy-MM-dd}
- */
-```
-
-### F06：public 方法 Javadoc 模板
-在方法声明前插入，参数列表按实际签名生成：
-```java
-/**
- * TODO: 方法描述
- *
- * @param paramName TODO
- * @return TODO
- */
-public XxxDTO findByCode(String code) {
-```
-只对 public 方法添加，private/protected 跳过。
-
-### F07：SaveParam 校验注解
-```java
-// String 类型必填字段
-@NotBlank(groups = {AddGroup.class, EditGroup.class}, message = "{validate.not-blank}")
-private String name;
-
-// 非 String 类型（Integer、Long 等）必填字段
-@NotNull(groups = {AddGroup.class, EditGroup.class}, message = "{validate.not-null}")
-private Integer status;
-```
-**只对 fixes 清单中明确列出的字段添加，不对所有字段盲加。**
-
-### F08：超长方法机械拆分（>50行）
-将超过 50 行的 public 方法中**数据准备、映射、组装**等独立逻辑块提取为 private 方法。
-**拆分原则（硬约束）**：
-1. 不改变任何业务逻辑，只做代码搬迁
-2. 主方法保留流程骨架，调用提取出的私有方法
-3. 每个私有方法职责单一，命名体现功能（如 `buildTypeNameMap`、`buildSnapshot`）
-4. 提取后主方法行数 ≤ 30 行，每个私有方法 ≤ 50 行
-5. 保留原有注释，在新私有方法上补简短 Javadoc
-
-```java
-// 修复前（75行的 public 方法）
-@Override
-public List<XxxSnapshot> findChangeLogByIds(List<Long> ids) {
-    // 数据准备（15行）...
-    // 字典查询（10行）...
-    // 组装 snapshot（50行）...
-}
-
-// 修复后
-@Override
-public List<XxxSnapshot> findChangeLogByIds(List<Long> ids) {
-    if (CollUtil.isEmpty(ids)) return new ArrayList<>();
-    List<XxxEntity> entities = xxxService.listByIds(ids);
-    if (CollUtil.isEmpty(entities)) return new ArrayList<>();
-    Map<Long, String> nameMap = buildNameMap(entities);
-    Map<String, String> dictMap = buildDictMap();
-    return entities.stream()
-            .map(e -> buildSnapshot(e, nameMap, dictMap))
-            .collect(Collectors.toList());
-}
-
-/** 批量查询名称映射 */
-private Map<Long, String> buildNameMap(List<XxxEntity> entities) { ... }
-
-/** 一次性拉取字典映射 */
-private Map<String, String> buildDictMap() { ... }
-
-/** 将实体转换为快照对象 */
-private XxxSnapshot buildSnapshot(XxxEntity e, Map<Long, String> nameMap, Map<String, String> dictMap) { ... }
-```
-**注意**：只对 AUTO-FIX LIST 中明确标出的超长方法拆分，不对其他方法主动拆分。
+### append_annotation（追加注解）
+在目标字段或方法声明行的**上方**插入注解，对齐现有代码缩进。
 
 ## 修复完成后输出格式
 
@@ -454,8 +348,9 @@ private XxxSnapshot buildSnapshot(XxxEntity e, Map<Long, String> nameMap, Map<St
 【文件：path/to/File.java】
 
 已完成：
-- [F01] 第 12 行：@Autowired → @Resource
-- [F03] 类级别：插入 serialVersionUID = 1L
+- 第 12 行（字段 xxxService）：@Autowired 替换为 @Resource
+- 第 67 行（catch 块）：log.error 补充异常参数 e
+- 类级别：插入 serialVersionUID = 1L
 
 lsp_diagnostics 结果：✅ 无编译错误
 ```
@@ -500,8 +395,8 @@ lsp_diagnostics 结果：❌ 编译错误
 
 | 文件 | 修复内容 | 轮次 |
 |------|---------|------|
-| `path/to/File.java` | F01×2, F03×1 | 第1轮 |
-| `path/to/Entity.java` | F04×1 | 第1轮 |
+| `path/to/File.java` | @Autowired→@Resource ×2, serialVersionUID ×1 | 第1轮 |
+| `path/to/Entity.java` | LocalDateTime TypeHandler ×1 | 第1轮 |
 
 ## 3. 需人工处理
 
