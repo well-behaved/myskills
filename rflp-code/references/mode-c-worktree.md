@@ -8,14 +8,32 @@
 
 ## 启动：创建 feature worktree（仅执行一次）
 
+> ⛔ **强制检查点（禁止跳过）：在任何文件读写或 git 操作之前，必须先完成以下步骤，确认 worktree 已就绪。**
+> **严禁在主仓库目录（非 `.worktrees/` 路径）下直接修改文件或执行 git add/commit。**
+
+> ⚠️ **worktree 必须放在主仓库的 `.worktrees/` 子目录下**，不要放到主仓库同级目录（如 `../worktree-xxx`），否则 IDE 打开主项目时看不到该目录。
+
 ```bash
-# 基于当前分支（main/develop）创建 feature worktree
+# 先确认主仓库当前分支（不能是 feature 分支，否则 worktree add 会冲突）
+git branch --show-current
+# 如果当前在 feature 分支，先切回主分支：
+# git checkout <base-branch>
+
+# 情况 A：feature 分支已存在（rflp-trd 已建好）→ 不加 -b
+git worktree add .worktrees/<feature-name> <FEATURE_BRANCH>
+
+# 情况 B：feature 分支尚不存在 → 加 -b 新建
 git worktree add .worktrees/<feature-name> -b <FEATURE_BRANCH>
+
+# 示例：
+# git worktree add .worktrees/pda-inventory-query feature/xue/pda-inventory-query
 ```
 
-更新 `.progress.json`：`worktree_path = ".worktrees/<feature-name>"`
+更新 `.progress.json`：`worktree_path = ".worktrees/<feature-name>"`（相对路径，不用绝对路径）
 
 > **命名建议：** worktree 目录名与 feature branch 保持一致，例如 `feature/user-auth` → `.worktrees/user-auth`
+>
+> **⚠️ 常见错误：** rflp-trd 阶段已用 `git checkout -b <FEATURE_BRANCH>` 建好分支时，主仓库 HEAD 会切到该分支。必须先 `git checkout <base-branch>` 切回，再执行 `git worktree add`（情况 A），否则报错 "is already used by worktree"。
 
 ---
 
@@ -32,26 +50,34 @@ task(category="deep", description="实现 Task N: [task name]", run_in_backgroun
      load_skills=[], prompt="
 你负责实现 [trd-file] 中的 Task N。
 
-⚠️ 重要：所有文件读写、git 操作必须在 worktree 目录内进行。
-具体方式（二选一，以项目实际情况为准）：
-- 方式一（推荐）：所有命令加 -C 前缀，例如：
-    git -C /abs/path/to/.worktrees/<feature-name> add src/Foo.java
-    git -C /abs/path/to/.worktrees/<feature-name> commit -m '...'
-  文件路径使用 worktree 下的绝对路径读写
-- 方式二：在 prompt 开头声明 '工作目录已切换至 .worktrees/<feature-name>'，
-  所有相对路径均以该目录为根
+⚠️ 重要：所有文件读写、git 操作必须使用 worktree 的【绝对路径】，严禁使用相对路径。
+worktree 绝对路径：<WORKTREE_ABS_PATH>（例如 D:\myworkplace\proj\.worktrees\feature-x）
 
-禁止：在主仓库目录下执行任何 git add / git commit 操作。
+文件读写规则：
+- 读文件：路径必须是 <WORKTREE_ABS_PATH>/src/... 形式的绝对路径
+- 写文件：路径必须是 <WORKTREE_ABS_PATH>/src/... 形式的绝对路径
+- 禁止：使用主仓库路径或任何相对路径读写文件
+
+git 操作规则：
+- 所有 git 命令必须加 -C <WORKTREE_ABS_PATH> 前缀，例如：
+    git -C <WORKTREE_ABS_PATH> add src/Foo.java
+    git -C <WORKTREE_ABS_PATH> commit -m '...'
+    git -C <WORKTREE_ABS_PATH> status
+- 禁止：在主仓库目录下执行任何 git add / git commit 操作
+- 禁止：git add .（必须精确指定文件路径）
+
+自检（每次 git add 前必做）：
+  运行 git -C <WORKTREE_ABS_PATH> status --short
+  确认变更文件全部在 <WORKTREE_ABS_PATH> 内，没有主仓库文件被误改
 
 执行步骤：
-1. 重新读取 [trd-file]，找到 Task N 的完整内容
-2. 严格按 task 里的每个 step 执行
+1. 重新读取 [trd-file]（使用主仓库绝对路径，TRD 文件在主仓库 docs/plans/ 下），找到 Task N 的完整内容
+2. 严格按 task 里的每个 step 执行，所有源码文件使用 worktree 绝对路径读写
 3. 写测试（如果 task 要求 TDD）
-4. 跑验证确认通过
+4. 跑验证：mvn compile/test 命令的工作目录必须是 <WORKTREE_ABS_PATH>
 5. 提交（仅此 task 的文件）：
-   git -C .worktrees/<feature-name> add <Task N 文件列表中声明的具体路径>
-   git -C .worktrees/<feature-name> commit -m 'feat/fix/chore: [Task N 描述]'
-   禁止 git add .
+   git -C <WORKTREE_ABS_PATH> add <精确文件路径列表>
+   git -C <WORKTREE_ABS_PATH> commit -m 'feat/fix/chore: [Task N 描述]'
 6. 报告：实现了什么、测试结果、改了哪些文件、遇到的问题
 ")
 ```
@@ -67,6 +93,30 @@ git -C .worktrees/<feature-name> rev-parse HEAD
 # 检查工作区干净
 git -C .worktrees/<feature-name> status --porcelain  # 必须为空
 ```
+
+### C2.5: 编译检查
+
+在 worktree 目录内执行编译：
+
+```bash
+mvn -B -DskipTests compile -f <WORKTREE_ABS_PATH>/pom.xml
+```
+
+- **BUILD SUCCESS** → 继续 C3
+- **BUILD FAILURE** → 在 worktree 内派 fix agent 修复编译错误，修复提交后重新跑编译，通过后再进 C3：
+
+```
+task(category="quick", description="Fix compile error after Task N", run_in_background=false,
+     load_skills=[], prompt="
+编译失败，错误信息如下：
+[粘贴 mvn 输出的 ERROR 部分]
+
+在 worktree 内修复编译错误。只修错误，不做任何额外改动。
+worktree 绝对路径：<WORKTREE_ABS_PATH>
+所有文件读写和 git 操作使用 worktree 绝对路径。
+修复后运行 mvn -B -DskipTests compile -f <WORKTREE_ABS_PATH>/pom.xml 确认 BUILD SUCCESS。
+精确路径提交：git -C <WORKTREE_ABS_PATH> add <文件> && git -C <WORKTREE_ABS_PATH> commit -m 'fix: 修复 Task N 编译错误'
+")
 
 ### C3: 派 review agent
 

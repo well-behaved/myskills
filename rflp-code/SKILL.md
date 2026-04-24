@@ -93,11 +93,83 @@ task(category="deep", description="Final review: [plan name]", run_in_background
 ")
 ```
 
-- **READY** → 确认工作区干净（`git status --porcelain` 为空），声明切到 rflp-finish
+- **READY** → 必须按以下 checklist 顺序执行，**不可跳过任何一步**：
+  1. 确认工作区干净：`git status --porcelain` 输出为空
+  2. **立即派 apm-auto-fix 子 agent**（见下方「代码审查」章节），等待结果
+  3. 根据修复报告决策（见下方），无 P0 问题后才可输出交接声明
   - **模式 C 注意：** 不要在此处执行 worktree merge——合并和 worktree 清理统一交由 rflp-finish 处理
 - **NOT_READY** → 列出未满足项，与用户讨论
 
-**交接声明：** "所有 task 完成，切到 rflp-finish。技术方案：`docs/plans/YYYY-MM-DD-xxx-trd.md`。"
+### 代码审查（READY checklist 第 2 步，必须执行，不得跳过）
+
+收集本次 TRD 所有 task 中 **`文件：`** 声明的路径，然后派独立子 agent 执行自动修复（扫描 + 修复 + 验证循环）。
+
+> ⚠️ **超时风险**：apm-auto-fix 内部要跑两轮 apm-code-review，每轮耗时较长，**必须用 `run_in_background=true` + 等待通知**，不能用 `run_in_background=false`（会超时）。
+
+**模式 A / 模式 B：**
+```
+task(subagent_type="build", description="Auto fix: [plan name]", run_in_background=true,
+     load_skills=["apm-auto-fix"], prompt="
+使用 apm-auto-fix skill，对以下指定文件执行自动修复流程（扫描 → 修复 → 验证循环）：
+
+修复范围：指定文件列表
+文件列表：
+<从 TRD 收集的文件路径列表，每行一个>
+
+完成后输出：
+1. 自动修复报告路径
+2. 已修复问题数 / 需人工处理的 P0/P1 问题数
+")
+```
+
+**模式 C（worktree）：**
+```
+task(subagent_type="build", description="Auto fix: [plan name]", run_in_background=true,
+     load_skills=["apm-auto-fix"], prompt="
+使用 apm-auto-fix skill，对以下指定 worktree 中的文件执行自动修复流程（扫描 → 修复 → 验证循环）：
+
+修复范围：worktree 模式
+worktree 路径：<WORKTREE_ABS_PATH>（来自 .progress.json 的 worktree_path 字段）
+
+文件列表（相对于 worktree 根目录）：
+<从 TRD 收集的文件路径列表，每行一个>
+
+完成后输出：
+1. 自动修复报告路径（写入主仓库 docs/）
+2. 已修复问题数 / 需人工处理的 P0/P1 问题数
+")
+```
+
+> ⚠️ **注意**：必须用 `subagent_type="build"`，不能用 `category="deep"`。`build` agent 继承当前工作目录，能正确找到 project-scope skill（apm-auto-fix、apm-code-review）；`category` 子 agent 在独立进程中运行，无法解析项目级 skill。
+
+**模式 C（worktree）：**
+```
+task(category="deep", description="Auto fix: [plan name]", run_in_background=true,
+     load_skills=["apm-auto-fix"], prompt="
+使用 apm-auto-fix skill，对以下指定 worktree 中的文件执行自动修复流程（扫描 → 修复 → 验证循环）：
+
+修复范围：worktree 模式
+worktree 路径：<WORKTREE_ABS_PATH>（来自 .progress.json 的 worktree_path 字段）
+
+文件列表（相对于 worktree 根目录）：
+<从 TRD 收集的文件路径列表，每行一个>
+
+完成后输出：
+1. 自动修复报告路径（写入主仓库 docs/）
+2. 已修复问题数 / 需人工处理的 P0/P1 问题数
+")
+```
+
+派发后**结束当前响应，等待系统通知**（`[BACKGROUND TASK COMPLETED]`），收到后用 `background_output(task_id="...")` 获取结果。
+
+> ⚠️ **等待期间不要做其他事**——apm-auto-fix 可能修改文件，不能并发操作同一 worktree。
+
+收到结果后，根据修复报告决策：
+- **无 P0/P1 问题** → 直接进入交接声明
+- **有 P0 问题** → 必须修复，修复后重新跑 final review，再次确认 READY
+- **只有 P1/P2/P3** → 展示给用户，由用户决定是立即修复还是记录后续处理，**不阻塞交接**
+
+**交接声明：** "所有 task 完成，代码审查通过，切到 rflp-finish。技术方案：`docs/plans/YYYY-MM-DD-xxx-trd.md`。"
 
 > 💡 **建议新开 session 后再执行 rflp-finish**，避免编码阶段积累的上下文影响收尾判断。
 
@@ -106,6 +178,7 @@ task(category="deep", description="Final review: [plan name]", run_in_background
 **绝不：**
 - 跳过验证步骤
 - 跳过 review（批间 / task 间）
+- **final review READY 后跳过 apm-auto-fix 代码审查直接输出交接声明**——即使"工作区干净"也不构成跳过理由
 - 并行派多个实现 agent
 - 手动修子 agent 的产出
 - 使用 `git add .` 提交——必须精确路径
@@ -137,6 +210,7 @@ task(category="deep", description="Final review: [plan name]", run_in_background
 - 启动时必须重新读取 TRD 文件，不依赖对话记忆
 - 严格按技术方案走，技术方案就是标准
 - 每个检查点暂停等反馈（用户可显式声明"跳过批间暂停"降级，但 final review 不可跳过）
+- **final review READY 后必须依次执行：① 确认工作区干净 → ② 派 apm-auto-fix → ③ 根据报告决策 → ④ 输出交接声明；缺少任何一步均视为流程未完成**
 - 阻塞时问，不猜
 - 中断恢复：优先读 `.progress.json`；所有 task 已完成 → finish 失败修复流程，不重走 worktree
 - 熔断规则：同一根因 3 次失败后用户说"继续"也不能跳过，必须报告并讨论

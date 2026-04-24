@@ -101,9 +101,9 @@ List<Long> userIdList = sysUserDeptService.lambdaQuery()
     .collect(Collectors.toList());
 ```
 
-### 2.3 Service 方法封装规范（禁止在 Service 外暴露 lambdaQuery 链式调用）
+### 2.3 Service 方法封装规范（禁止在 Service 外调用 IService 方法）
 
-**核心原则**：禁止在一个 Service 内部直接调用另一个 Service 的 MyBatis-Plus 扩展方法（`lambdaQuery()`、`lambdaUpdate()` 等），这些方法属于数据访问层的实现细节，不应泄漏到业务逻辑中。
+**核心原则**：禁止在一个 Service 内部直接调用另一个 Service 继承自 MyBatis-Plus IService 的任何方法（包括但不限于 `lambdaQuery()`、`lambdaUpdate()`、`listByIds()`、`getById()`、`list()`、`count()`、`page()` 等），这些方法属于数据访问层的实现细节，不应泄漏到业务逻辑中。
 
 ```java
 // ❌ 禁止：在 ServiceA 内部通过 ServiceB 暴露的 lambdaQuery 构建查询条件
@@ -113,9 +113,15 @@ OpsWarehouseEntity warehouse = opsWarehouseService.lambdaQuery()
     .last("LIMIT 1")
     .one();
 
-// ✅ 正确：先检查 opsWarehouseService 是否已有合适方法
-//         若没有，则在 OpsWarehouseService 中封装语义化方法，再调用
+// ❌ 禁止：在 ServiceA 内部直接调用 ServiceB 的 listByIds / getById 等 IService 方法
+List<OpsPlantEntity> plants = opsPlantService.listByIds(plantIds);
+OpsPlantEntity plant = opsPlantService.getById(plantId);
+
+// ✅ 正确：先检查目标 Service 是否已有合适方法
+//         若没有，则在目标 Service 中封装语义化方法，再调用
 OpsWarehouseEntity warehouse = opsWarehouseService.getEntityByCode(param.getLgort());
+Map<Long, OpsPlantDTO> plantMap = opsPlantService.getPlantMap(plantIds);
+OpsPlantDTO plant = opsPlantService.getById(plantId);  // Service 自身定义的 getById，返回 DTO
 ```
 
 **封装方法示例**（在目标 Service 内实现）：
@@ -146,8 +152,9 @@ public OpsWarehouseEntity getEntityByCode(String code) {
 
 **Review 要点**：
 - ✅ 调用方只依赖语义化方法名，不感知底层查询构建细节
-- ✅ 被调用 Service 内部可自由使用 `lambdaQuery()` 实现
+- ✅ 被调用 Service 内部可自由使用 `lambdaQuery()` / `listByIds()` 等实现
 - ❌ 在外部 Service / Controller 中链式调用 `xyzService.lambdaQuery().eq(...).one()`
+- ❌ 在外部 Service / Controller 中调用 `xyzService.listByIds()` / `xyzService.getById()` 等 IService 继承方法
 - ❌ 为了"方便"将 `lambdaQuery()` 结果直接返回给调用方
 
 ### 2.3 使用 Mapper XML（复杂查询）

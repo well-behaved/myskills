@@ -30,6 +30,27 @@ git rev-parse HEAD  # 记为 HEAD_SHA
 git status --porcelain  # 必须为空
 ```
 
+## B3.5: 编译检查
+
+```bash
+mvn -B -DskipTests compile
+```
+
+- **BUILD SUCCESS** → 继续 B4
+- **BUILD FAILURE** → 派 fix agent 修复编译错误，修复提交后重新跑编译，通过后再进 B4：
+
+```
+task(category="quick", description="Fix compile error after Task N", run_in_background=false,
+     load_skills=[], prompt="
+编译失败，错误信息如下：
+[粘贴 mvn 输出的 ERROR 部分]
+
+修复编译错误。只修错误，不做任何额外改动。
+修复后运行 mvn -B -DskipTests compile 确认 BUILD SUCCESS。
+精确路径提交：git add <文件> && git commit -m 'fix: 修复 Task N 编译错误'
+")
+```
+
 ## B4: 派 review agent
 
 ```

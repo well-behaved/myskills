@@ -230,7 +230,17 @@ ALTER TABLE yyy ADD COLUMN zzz VARCHAR(255) NOT NULL DEFAULT '';
      ```bash
      git checkout -b <feature-branch>
      ```
-     再声明："技术方案已保存到 `docs/plans/YYYY-MM-DD-xxx-trd.md`。feature branch：`<feature-branch>`。切到 rflp-code，模式 C。"
+     然后**立即创建 worktree**，放在主仓库的 `.worktrees/` 子目录下（这样 IDE 打开主项目时可见）：
+     ```bash
+     # 确认当前分支不是 feature 分支，否则先切回主分支
+     git branch --show-current
+     # 创建 worktree（统一放 .worktrees/ 下，不要放到主仓库外部）
+     git worktree add .worktrees/<feature-name> <feature-branch>
+     # 示例：git worktree add .worktrees/pda-inventory-query feature/xue/pda-inventory-query
+     ```
+     > ⚠️ worktree **必须放在 `.worktrees/` 下**，不要放到主仓库同级目录（如 `../worktree-xxx`），否则 IDE 里看不到。
+     
+     再声明："技术方案已保存到 `docs/plans/YYYY-MM-DD-xxx-trd.md`。feature branch：`<feature-branch>`，worktree：`.worktrees/<feature-name>`。切到 rflp-code，模式 C。"
 
 ## 记住
 

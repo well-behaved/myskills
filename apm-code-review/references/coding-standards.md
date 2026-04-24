@@ -151,10 +151,10 @@ Controller 方法名应与 Service 方法名一致或语义对应：
 
 ### 2.4 方法长度限制
 
-**单个方法不得超过 70 行，超过必须拆分。**
+**单个方法不得超过 50 行，超过必须拆分。**
 
 ```java
-// ❌ 违规：一个方法超过 70 行，混杂参数校验、数据查询、业务计算、结果组装
+// ❌ 违规：一个方法超过 50 行，混杂参数校验、数据查询、业务计算、结果组装
 @Override
 public OpsOrderResultDTO executeOrder(OpsOrderParam param) {
     // 参数校验 10 行
@@ -165,7 +165,7 @@ public OpsOrderResultDTO executeOrder(OpsOrderParam param) {
     // 共 80 行 ❌
 }
 
-// ✅ 拆分为职责单一的私有方法，每个方法 ≤ 70 行
+// ✅ 拆分为职责单一的私有方法，每个方法 ≤ 50 行
 @Override
 public OpsOrderResultDTO executeOrder(OpsOrderParam param) {
     validateOrderParam(param);                    // 参数校验
@@ -180,10 +180,10 @@ public OpsOrderResultDTO executeOrder(OpsOrderParam param) {
 **拆分原则**：
 - 按业务步骤拆分（校验 → 查询 → 计算 → 持久化 → 通知）
 - 每个 private 方法只做一件事，方法名能准确描述其职责
-- 拆分后的 private 方法同样受 70 行限制约束
+- 拆分后的 private 方法同样受 50 行限制约束
 
 **Review 要点**：
-- 🟠 P1：方法超过 70 行 → 必须拆分，不可豁免
+- 🟠 P1：方法超过 50 行 → 必须拆分，不可豁免
 - 统计行数时包含空行和注释行，不含方法签名行和结束 `}`
 
 ## 3. 变量命名规范
