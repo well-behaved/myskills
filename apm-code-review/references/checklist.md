@@ -101,6 +101,10 @@ Mapper      → P1: @Mapper + @Param("param") + 返回DTO不返回Entity
 Mapper XML  → P0: #{} 参数化禁止${}
               规范: schema前缀 + <if>判空 + resultMap中LocalDateTime列加typeHandler=TimestampTypeHandler
               P1: LIKE查询用 '%' || #{val} || '%' 拼接（禁止CONCAT或${}）
+              P1: XML中所有#{param}占位符必须显式指定jdbcType，无一例外
+                  （如#{id,jdbcType=BIGINT}、#{status,jdbcType=VARCHAR}、#{name,jdbcType=VARCHAR}），
+                  涵盖INSERT VALUES、UPDATE SET、WHERE条件、foreach item、<if>判断内等所有位置，
+                  数据量大时MyBatis类型推断可能失效导致类型不匹配错误
 
 Entity      → P1: 继承TenantBaseEntity + @TableName(schema+autoResultMap=true)
                   + LocalDateTime字段加@TableField(typeHandler=TimestampTypeHandler.class) + 字段注释
